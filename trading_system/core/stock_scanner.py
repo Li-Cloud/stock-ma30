@@ -278,15 +278,28 @@ class StockScanner:
         # 3. 批量分析股票阶段
         phase2_stocks = []
         trade_signals = []
+        
+        # 统计各阶段数量
+        phase_stats = {
+            "PHASE_1_BOTTOM": 0,
+            "PHASE_2_RISING": 0,
+            "PHASE_3_TOP": 0,
+            "PHASE_4_FALLING": 0,
+            "UNKNOWN": 0,
+            "ERROR": 0
+        }
+        
         # 分批处理，避免并发过多（优化批次大小）
         # 自动调整批次大小：最小20，最大50
         effective_batch_size = max(20, min(batch_size, 50))
         total_batches = (len(valid_stocks) - 1) // effective_batch_size + 1
         
+        logger.info(f"开始批量分析，批次大小: {effective_batch_size}，总批次: {total_batches}")
+        
         for i in range(0, len(valid_stocks), effective_batch_size):
             batch = valid_stocks[i:i + effective_batch_size]
             current_batch = i // effective_batch_size + 1
-            logger.info(f"处理批次 {current_batch}/{total_batches}")
+            logger.info(f"处理批次 {current_batch}/{total_batches}，本批次 {len(batch)} 只股票")
 
             # 更新进度
             if progress_callback:
@@ -305,36 +318,58 @@ class StockScanner:
             tasks = [self._analyze_single_stock(s, generate_signals) for s in batch]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
+            # 统计本批次结果
+            batch_phase2_count = 0
             for stock, result in zip(batch, results):
                 if isinstance(result, Exception):
-                    logger.warning(f"分析 {stock['code']} 出错: {result}")
+                    logger.warning(f"[{stock['code']}] 分析出错: {result}")
+                    phase_stats["ERROR"] += 1
                     continue
 
-                if result and result.get("phase") == "PHASE_2_RISING":
-                    stock_info = {
-                        "code": result["code"],
-                        "name": result["name"],
-                        "phase": result["phase"],
-                        "current_price": result["current_price"],
-                        "ma30": result["ma30"],
-                        "trend_strength": result["trend_strength"],
-                        "volume_ratio": result["volume_ratio"],
-                        "weeks_in_phase2": result["weeks_in_phase2"],
-                        "breakout_confirmed": result["breakout_confirmed"]
-                    }
-                    phase2_stocks.append(stock_info)
-
-                    # 收集交易信号
-                    if generate_signals and result.get("signal"):
-                        trade_signals.append(result["signal"])
-                        logger.info(f"✓ 发现第二阶段股票并生成信号: {stock['code']} {stock['name']} - {result['signal'].signal_type.value}")
+                if result:
+                    phase = result.get("phase")
+                    if phase in phase_stats:
+                        phase_stats[phase] += 1
                     else:
-                        logger.info(f"✓ 发现第二阶段股票: {stock['code']} {stock['name']}")
+                        phase_stats["UNKNOWN"] += 1
+                    
+                    if phase == "PHASE_2_RISING":
+                        batch_phase2_count += 1
+                        stock_info = {
+                            "code": result["code"],
+                            "name": result["name"],
+                            "phase": result["phase"],
+                            "current_price": result["current_price"],
+                            "ma30": result["ma30"],
+                            "trend_strength": result["trend_strength"],
+                            "volume_ratio": result["volume_ratio"],
+                            "weeks_in_phase2": result["weeks_in_phase2"],
+                            "breakout_confirmed": result["breakout_confirmed"]
+                        }
+                        phase2_stocks.append(stock_info)
 
-                    # 达到上限时提前返回（max_stocks=0表示不限制）
-                    if max_stocks > 0 and len(phase2_stocks) >= max_stocks:
-                        logger.info(f"已达到最大数量 {max_stocks}，停止扫描")
-                        break
+                        # 收集交易信号
+                        if generate_signals and result.get("signal"):
+                            trade_signals.append(result["signal"])
+                        
+                    else:
+                        logger.debug(f"[{stock['code']}] {result.get('name', '')} - 阶段: {phase}")
+                else:
+                    # 数据不足或分析失败
+                    phase_stats["UNKNOWN"] += 1
+
+            # 批次统计日志
+            logger.info(
+                f"批次 {current_batch}/{total_batches} 完成 - "
+                f"本批次第二阶段: {batch_phase2_count} 只 | "
+                f"累计第二阶段: {len(phase2_stocks)} 只 | "
+                f"本批次错误: {phase_stats['ERROR']} 只"
+            )
+
+            # 达到上限时提前返回（max_stocks=0表示不限制）
+            if max_stocks > 0 and len(phase2_stocks) >= max_stocks:
+                logger.info(f"已达到最大数量 {max_stocks}，停止扫描")
+                break
 
             if max_stocks > 0 and len(phase2_stocks) >= max_stocks:
                 break
@@ -342,8 +377,21 @@ class StockScanner:
             # 批次间短暂延迟，避免请求过快
             await asyncio.sleep(0.1)  # 从0.5秒减少到0.1秒
         
+        # 最终统计
         duration = int(time.time() - start_time)
-        logger.info(f"扫描完成，找到 {len(phase2_stocks)} 只第二阶段股票，生成 {len(trade_signals)} 个交易信号，耗时 {duration} 秒")
+        logger.info("=" * 80)
+        logger.info(f"扫描完成统计:")
+        logger.info(f"  总耗时: {duration} 秒")
+        logger.info(f"  处理股票: {len(valid_stocks)} 只")
+        logger.info(f"  阶段分布:")
+        logger.info(f"    第一阶段(底部): {phase_stats['PHASE_1_BOTTOM']} 只")
+        logger.info(f"    第二阶段(上升): {phase_stats['PHASE_2_RISING']} 只 ✓")
+        logger.info(f"    第三阶段(顶部): {phase_stats['PHASE_3_TOP']} 只")
+        logger.info(f"    第四阶段(下降): {phase_stats['PHASE_4_FALLING']} 只")
+        logger.info(f"    未知/数据不足: {phase_stats['UNKNOWN']} 只")
+        logger.info(f"    分析错误: {phase_stats['ERROR']} 只")
+        logger.info(f"  生成交易信号: {len(trade_signals)} 个")
+        logger.info("=" * 80)
         
         # 4. 保存到数据库
         if save_to_db and phase2_stocks:
@@ -367,7 +415,22 @@ class StockScanner:
                     statistics, 
                     duration
                 )
-                logger.info(f"扫描结果已保存到数据库，批次ID: {batch_id}，找到 {len(phase2_stocks)} 只第二阶段股票")
+                logger.info(f"扫描结果已保存到数据库，批次ID: {batch_id}")
+                
+                # 输出找到的第二阶段股票列表
+                if phase2_stocks:
+                    logger.info("=" * 80)
+                    logger.info(f"第二阶段股票列表 ({len(phase2_stocks)} 只):")
+                    for idx, stock in enumerate(phase2_stocks, 1):
+                        logger.info(
+                            f"  {idx}. {stock['code']} {stock['name']} - "
+                            f"¥{stock['current_price']} | "
+                            f"MA30: ¥{stock['ma30']} | "
+                            f"强度: {stock['trend_strength']} | "
+                            f"成交量: {stock['volume_ratio']}x | "
+                            f"持续: {stock['weeks_in_phase2']}周"
+                        )
+                    logger.info("=" * 80)
             except Exception as e:
                 logger.error(f"保存扫描结果到数据库失败: {e}")
         
@@ -388,21 +451,39 @@ class StockScanner:
         name = stock.get("name", "")
         
         try:
+            logger.info(f"[{code}] 开始分析 {name}")
+            
             # 获取周线数据
             df = await self.data_collector.get_weekly_data(code, weeks=150)
             if df is None or len(df) < 30:
+                logger.warning(f"[{code}] 数据不足，需要至少30周数据，当前: {len(df) if df is not None else 0} 周")
                 return None
+            
+            logger.info(f"[{code}] 获取数据成功，共 {len(df)} 周数据")
             
             # 分析阶段
             phase, metrics = self.phase_analyzer.analyze_phase(df)
             
+            # 记录分析结果
+            latest = df.iloc[-1]
+            logger.info(
+                f"[{code}] 阶段分析完成 - "
+                f"阶段: {phase.name} | "
+                f"价格: ¥{latest['close']:.2f} | "
+                f"MA30: ¥{latest['ma30']:.2f if 'ma30' in latest else 'N/A'} | "
+                f"均线方向: {metrics.ma30_direction} | "
+                f"斜率: {metrics.ma30_slope:.4f} | "
+                f"成交量比率: {metrics.volume_ratio:.2f}x"
+            )
+            
             # 只返回第二阶段股票详情
             if phase != StockPhase.PHASE_2_RISING:
+                logger.debug(f"[{code}] 非第二阶段股票，跳过")
                 return None
             
-            # 获取最新数据
-            latest = df.iloc[-1]
+            logger.info(f"[{code}] ✓ 确认为第二阶段股票")
             
+            # 构建结果
             result = {
                 "code": code,
                 "name": stock.get("name", ""),
@@ -415,17 +496,31 @@ class StockScanner:
                 "breakout_confirmed": metrics.breakout_confirmed
             }
             
+            logger.info(
+                f"[{code}] 第二阶段详情 - "
+                f"价格/MA30: {latest['close']:.2f}/{latest['ma30']:.2f if 'ma30' in latest else 'N/A'} | "
+                f"趋势强度: {metrics.ma30_slope:.4f} | "
+                f"成交量: {metrics.volume_ratio:.2f}x | "
+                f"突破确认: {'是' if metrics.breakout_confirmed else '否'} | "
+                f"持续周数: {result['weeks_in_phase2']}"
+            )
+            
             # 生成交易信号
             if generate_signal:
                 signals = self.signal_generator.generate_signals(code, name, df)
                 if signals:
                     # 取第一个信号（通常是BUY或HOLD）
                     result["signal"] = signals[0]
+                    logger.info(
+                        f"[{code}] 生成交易信号 - "
+                        f"类型: {signals[0].signal_type.value} | "
+                        f"理由: {signals[0].reason}"
+                    )
             
             return result
             
         except Exception as e:
-            logger.debug(f"分析 {code} 失败: {e}")
+            logger.error(f"[{code}] 分析失败: {e}")
             return None
     
     def _count_weeks_in_phase2(self, df) -> int:
