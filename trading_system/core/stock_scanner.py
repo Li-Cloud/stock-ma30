@@ -471,11 +471,15 @@ class StockScanner:
             
             # 记录分析结果
             latest = df.iloc[-1]
+            
+            # 准备MA30显示值
+            ma30_display = f"{latest['ma30']:.2f}" if 'ma30' in latest else "N/A"
+            
             logger.info(
                 f"[{code}] 阶段分析完成 - "
                 f"阶段: {phase.name} | "
                 f"价格: ¥{latest['close']:.2f} | "
-                f"MA30: ¥{latest['ma30']:.2f if 'ma30' in latest else 'N/A'} | "
+                f"MA30: ¥{ma30_display} | "
                 f"均线方向: {metrics.ma30_direction} | "
                 f"斜率: {metrics.ma30_slope:.4f} | "
                 f"成交量比率: {metrics.volume_ratio:.2f}x"
@@ -503,7 +507,7 @@ class StockScanner:
             
             logger.info(
                 f"[{code}] 第二阶段详情 - "
-                f"价格/MA30: {latest['close']:.2f}/{latest['ma30']:.2f if 'ma30' in latest else 'N/A'} | "
+                f"价格/MA30: {latest['close']:.2f}/{ma30_display} | "
                 f"趋势强度: {metrics.ma30_slope:.4f} | "
                 f"成交量: {metrics.volume_ratio:.2f}x | "
                 f"突破确认: {'是' if metrics.breakout_confirmed else '否'} | "
