@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { 
-  TrendingUp, 
-  TrendingDown, 
-  Activity, 
+import {
+  TrendingUp,
+  TrendingDown,
+  Activity,
   Settings,
   BarChart3,
   PieChart,
@@ -13,7 +13,7 @@ import {
   Menu,
   X,
   Scan,
-  Github
+  ExternalLink
 } from 'lucide-react'
 import Dashboard from './components/Dashboard'
 import Signals from './components/Signals'
@@ -169,7 +169,7 @@ function App() {
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 px-4 py-2 bg-white/10 text-gray-300 rounded-lg hover:bg-white/20 hover:text-white transition-colors"
               >
-                <Github className="w-4 h-4" />
+                <ExternalLink className="w-4 h-4" />
                 <span className="text-sm font-medium">GitHub</span>
               </a>
               <button 

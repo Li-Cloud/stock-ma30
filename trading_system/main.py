@@ -4,6 +4,7 @@
 """
 import asyncio
 import sys
+import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -35,6 +36,18 @@ logger.add(
 # 全局实例
 trading_system: Optional[TradingSystem] = None
 task_scheduler: Optional[TaskScheduler] = None
+
+# 扫描进度跟踪
+scan_progress = {
+    "is_scanning": False,
+    "total_stocks": 0,
+    "processed_stocks": 0,
+    "phase2_found": 0,
+    "current_batch": 0,
+    "total_batches": 0,
+    "start_time": None,
+    "error": None
+}
 
 
 # 请求模型
@@ -427,7 +440,7 @@ async def scan_market(
 ):
     """
     全市场扫描 - 找出第二阶段股票并生成交易信号
-    
+
     Args:
         max_stocks: 最大返回数量（0表示不限制，默认0）
         exclude_st: 排除ST股票
@@ -435,9 +448,24 @@ async def scan_market(
         exclude_star: 排除科创板(688)
         generate_signals: 是否生成交易信号（默认True）
     """
+    global scan_progress
+    start_time = time.time()
+
     try:
         from core.stock_scanner import StockScanner, StockFilter
-        
+
+        # 初始化进度
+        scan_progress = {
+            "is_scanning": True,
+            "total_stocks": 0,
+            "processed_stocks": 0,
+            "phase2_found": 0,
+            "current_batch": 0,
+            "total_batches": 0,
+            "start_time": start_time,
+            "error": None
+        }
+
         filter_config = StockFilter(
             exclude_st=exclude_st,
             exclude_gem=exclude_gem,
@@ -445,34 +473,44 @@ async def scan_market(
             exclude_bse=True,
             exclude_delisting=True
         )
-        
+
         async with StockScanner(filter_config) as scanner:
             if max_stocks > 0:
                 logger.info(f"开始全市场扫描，最多返回 {max_stocks} 只股票...")
             else:
                 logger.info("开始全市场扫描，不限制返回数量...")
-            
+
+            # 定义进度回调函数
+            def update_progress(progress_data):
+                scan_progress.update(progress_data)
+
             phase2_stocks, trade_signals = await scanner.scan_phase2_stocks(
                 max_stocks=max_stocks,
                 batch_size=10,
-                generate_signals=generate_signals
+                generate_signals=generate_signals,
+                progress_callback=update_progress
             )
-            
+
+            # 扫描完成
+            scan_progress["is_scanning"] = False
+            scan_progress["processed_stocks"] = scan_progress["total_stocks"]
+            scan_progress["phase2_found"] = len(phase2_stocks)
+
             # 将信号添加到全局交易信号列表
             if generate_signals and trade_signals:
                 global trading_system
                 if trading_system:
                     for signal in trade_signals:
                         # 避免重复添加
-                        existing = [s for s in trading_system.trade_signals 
-                                  if s.stock_code == signal.stock_code and 
+                        existing = [s for s in trading_system.trade_signals
+                                  if s.stock_code == signal.stock_code and
                                   s.signal_type == signal.signal_type]
                         if not existing:
                             trading_system.trade_signals.append(signal)
                             logger.info(f"已将 {signal.stock_code} 的 {signal.signal_type.value} 信号加入监测")
-                
+
                 logger.info(f"扫描完成，共生成 {len(trade_signals)} 个交易信号并加入监测")
-            
+
             return {
                 "success": True,
                 "count": len(phase2_stocks),
@@ -495,9 +533,11 @@ async def scan_market(
                     "exclude_star": exclude_star
                 }
             }
-            
+
     except Exception as e:
         logger.error(f"市场扫描失败: {e}")
+        scan_progress["is_scanning"] = False
+        scan_progress["error"] = str(e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -638,6 +678,13 @@ async def get_persistent_phase2_stocks(
     except Exception as e:
         logger.error(f"获取持续强势股失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/market/scan/progress")
+async def get_scan_progress():
+    """获取扫描进度"""
+    global scan_progress
+    return scan_progress
 
 
 # CLI入口

@@ -15,12 +15,13 @@ import {
   Database,
   Activity
 } from 'lucide-react'
-import { 
-  scanMarket, 
-  getMarketStatistics, 
-  getScanHistory, 
+import {
+  scanMarket,
+  getMarketStatistics,
+  getScanHistory,
   getLatestScanResults,
-  getPersistentPhase2Stocks 
+  getPersistentPhase2Stocks,
+  getScanProgress
 } from '../api/client'
 
 interface Phase2Stock {
@@ -74,6 +75,9 @@ export default function MarketScan() {
   const [stats, setStats] = useState<MarketStats | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'scan' | 'history' | 'persistent'>('scan')
+
+  // 扫描进度状态
+  const [scanProgress, setScanProgress] = useState<any>(null)
   
   // 历史记录
   const [historyRecords, setHistoryRecords] = useState<ScanRecord[]>([])
@@ -181,8 +185,21 @@ export default function MarketScan() {
       setError(null)
       setGeneratedSignals([])
       setSignalCount(0)
+      setScanProgress(null)
       console.log('开始全市场扫描...')
-      
+
+      // 启动进度轮询
+      const progressInterval = setInterval(async () => {
+        try {
+          const progress = await getScanProgress()
+          if (progress && progress.is_scanning) {
+            setScanProgress(progress)
+          }
+        } catch (err) {
+          console.error('获取进度失败:', err)
+        }
+      }, 1000) // 每秒更新一次
+
       const response = await scanMarket(
         filters.maxStocks,
         filters.excludeST,
@@ -190,13 +207,16 @@ export default function MarketScan() {
         filters.excludeSTAR,
         true // 生成信号
       )
-      
+
+      // 清除进度轮询
+      clearInterval(progressInterval)
+
       if (response.success) {
         setStocks(response.stocks)
         setSignalCount(response.signal_count || 0)
         setGeneratedSignals(response.signals || [])
         console.log(`扫描完成，找到 ${response.count} 只第二阶段股票，生成 ${response.signal_count} 个交易信号`)
-        
+
         // 显示提示
         if (response.signal_count > 0) {
           alert(`扫描完成！\n发现 ${response.count} 只第二阶段股票\n已生成 ${response.signal_count} 个交易信号并加入监测\n\n请前往"交易信号"页面查看详情。`)
@@ -208,6 +228,7 @@ export default function MarketScan() {
       alert('扫描失败: ' + (err.message || '未知错误'))
     } finally {
       setScanning(false)
+      setScanProgress(null)
     }
   }
 
@@ -460,8 +481,59 @@ export default function MarketScan() {
           {scanning ? (
             <div className="text-center py-12">
               <RefreshCw className="w-10 h-10 animate-spin mx-auto mb-4 text-primary" />
-              <p className="text-gray-400">正在扫描全市场股票...</p>
-              <p className="text-gray-500 text-sm mt-2">预计需要1-3分钟</p>
+              <p className="text-gray-400 mb-4">正在扫描全市场股票...</p>
+
+              {/* 进度信息 */}
+              {scanProgress && (
+                <div className="max-w-md mx-auto space-y-4">
+                  {/* 进度条 */}
+                  <div className="bg-white/5 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm text-gray-400">扫描进度</span>
+                      <span className="text-sm text-white font-medium">
+                        {scanProgress.processed_stocks} / {scanProgress.total_stocks}
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-700 rounded-full h-2">
+                      <div
+                        className="bg-primary h-2 rounded-full transition-all duration-300"
+                        style={{
+                          width: `${scanProgress.total_stocks > 0
+                            ? (scanProgress.processed_stocks / scanProgress.total_stocks * 100)
+                            : 0}%`
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* 详细信息 */}
+                  <div className="grid grid-cols-2 gap-4 text-left">
+                    <div className="bg-white/5 rounded-lg p-3">
+                      <p className="text-xs text-gray-400 mb-1">已处理批次</p>
+                      <p className="text-lg font-semibold text-white">
+                        {scanProgress.current_batch} / {scanProgress.total_batches}
+                      </p>
+                    </div>
+                    <div className="bg-white/5 rounded-lg p-3">
+                      <p className="text-xs text-gray-400 mb-1">发现第二阶段</p>
+                      <p className="text-lg font-semibold text-emerald-400">
+                        {scanProgress.phase2_found} 只
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 耗时 */}
+                  {scanProgress.start_time && (
+                    <div className="text-xs text-gray-500">
+                      已耗时: {Math.floor((Date.now() - scanProgress.start_time * 1000) / 1000)} 秒
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!scanProgress && (
+                <p className="text-gray-500 text-sm mt-2">预计需要1-3分钟</p>
+              )}
             </div>
           ) : stocks.length === 0 ? (
             <div className="text-center py-12 text-gray-400">

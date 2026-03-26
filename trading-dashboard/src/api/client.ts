@@ -1,5 +1,5 @@
-// API客户端
-const API_BASE_URL = 'http://localhost:8000';
+// API客户端 - 使用相对路径，通过 Vite 代理转发到后端
+const API_BASE_URL = '';
 
 export async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
@@ -26,7 +26,7 @@ export async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   } catch (error: any) {
     console.error(`API请求异常: ${error.message}`);
     if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-      throw new Error('无法连接到后端服务 (http://localhost:8000)，请确认后端已启动');
+      throw new Error('无法连接到后端服务，请确认后端已启动');
     }
     throw error;
   }
@@ -114,4 +114,9 @@ export async function getLatestScanResults() {
 // 获取持续强势股（多日出现在第二阶段）
 export async function getPersistentPhase2Stocks(minDays: number = 3) {
   return fetchAPI(`/api/market/scan/persistent?min_days=${minDays}`);
+}
+
+// 获取扫描进度
+export async function getScanProgress() {
+  return fetchAPI('/api/market/scan/progress');
 }

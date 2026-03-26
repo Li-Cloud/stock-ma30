@@ -246,11 +246,12 @@ class StockScanner:
         return True
     
     async def scan_phase2_stocks(
-        self, 
+        self,
         max_stocks: int = 0,
         batch_size: int = 10,
         save_to_db: bool = True,
-        generate_signals: bool = True
+        generate_signals: bool = True,
+        progress_callback: Optional[callable] = None
     ) -> Tuple[List[Dict], List[TradeSignal]]:
         """
         扫描全市场，找出第二阶段股票并生成交易信号
@@ -277,21 +278,38 @@ class StockScanner:
         # 3. 批量分析股票阶段
         phase2_stocks = []
         trade_signals = []
+        # 分批处理，避免并发过多（优化批次大小）
+        # 自动调整批次大小：最小20，最大50
+        effective_batch_size = max(20, min(batch_size, 50))
+        total_batches = (len(valid_stocks) - 1) // effective_batch_size + 1
         
-        # 分批处理，避免并发过多
-        for i in range(0, len(valid_stocks), batch_size):
-            batch = valid_stocks[i:i + batch_size]
-            logger.info(f"处理批次 {i//batch_size + 1}/{(len(valid_stocks)-1)//batch_size + 1}")
-            
+        for i in range(0, len(valid_stocks), effective_batch_size):
+            batch = valid_stocks[i:i + effective_batch_size]
+            current_batch = i // effective_batch_size + 1
+            logger.info(f"处理批次 {current_batch}/{total_batches}")
+
+            # 更新进度
+            if progress_callback:
+                progress_callback({
+                    "is_scanning": True,
+                    "total_stocks": len(valid_stocks),
+                    "processed_stocks": i,
+                    "phase2_found": len(phase2_stocks),
+                    "current_batch": current_batch,
+                    "total_batches": total_batches,
+                    "start_time": start_time,
+                    "error": None
+                })
+
             # 并发分析
             tasks = [self._analyze_single_stock(s, generate_signals) for s in batch]
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             for stock, result in zip(batch, results):
                 if isinstance(result, Exception):
                     logger.warning(f"分析 {stock['code']} 出错: {result}")
                     continue
-                    
+
                 if result and result.get("phase") == "PHASE_2_RISING":
                     stock_info = {
                         "code": result["code"],
@@ -305,24 +323,24 @@ class StockScanner:
                         "breakout_confirmed": result["breakout_confirmed"]
                     }
                     phase2_stocks.append(stock_info)
-                    
+
                     # 收集交易信号
                     if generate_signals and result.get("signal"):
                         trade_signals.append(result["signal"])
                         logger.info(f"✓ 发现第二阶段股票并生成信号: {stock['code']} {stock['name']} - {result['signal'].signal_type.value}")
                     else:
                         logger.info(f"✓ 发现第二阶段股票: {stock['code']} {stock['name']}")
-                    
+
                     # 达到上限时提前返回（max_stocks=0表示不限制）
                     if max_stocks > 0 and len(phase2_stocks) >= max_stocks:
                         logger.info(f"已达到最大数量 {max_stocks}，停止扫描")
                         break
-            
+
             if max_stocks > 0 and len(phase2_stocks) >= max_stocks:
                 break
-                
+
             # 批次间短暂延迟，避免请求过快
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.1)  # 从0.5秒减少到0.1秒
         
         duration = int(time.time() - start_time)
         logger.info(f"扫描完成，找到 {len(phase2_stocks)} 只第二阶段股票，生成 {len(trade_signals)} 个交易信号，耗时 {duration} 秒")
@@ -342,13 +360,14 @@ class StockScanner:
                     'exclude_bse': self.filter.exclude_bse,
                     'excluded_prefixes': list(self.filter.excluded_prefixes)
                 }
+                # 即使没有找到第二阶段股票，也要保存扫描记录
                 batch_id = db.save_scan_results(
-                    phase2_stocks, 
+                    phase2_stocks if phase2_stocks else [],  # 传入空列表
                     filter_config, 
                     statistics, 
                     duration
                 )
-                logger.info(f"扫描结果已保存到数据库，批次ID: {batch_id}")
+                logger.info(f"扫描结果已保存到数据库，批次ID: {batch_id}，找到 {len(phase2_stocks)} 只第二阶段股票")
             except Exception as e:
                 logger.error(f"保存扫描结果到数据库失败: {e}")
         
