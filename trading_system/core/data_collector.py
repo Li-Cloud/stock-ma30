@@ -7,11 +7,14 @@ API地址: http://43.138.33.77:8080/
 """
 import httpx
 import pandas as pd
+import numpy as np
+import json
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from loguru import logger
 
 from config import get_settings
+from models.database import get_scan_db
 
 
 class DataCollector:
@@ -24,6 +27,69 @@ class DataCollector:
         self.settings = get_settings()
         self.base_url = (base_url or self.settings.tdx_api_url).rstrip("/")
         self.client = httpx.AsyncClient(timeout=30.0)
+        self.db = get_scan_db() if self.settings.enable_kline_cache else None
+    
+    def _check_dataframe_has_nan(self, df: pd.DataFrame) -> bool:
+        """
+        检查DataFrame中是否存在NaN值
+        
+        Args:
+            df: 要检查的DataFrame
+            
+        Returns:
+            如果存在NaN返回True，否则返回False
+        """
+        if df is None:
+            return True
+        
+        # 检查数值列是否有NaN
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        for col in numeric_cols:
+            if df[col].isna().any():
+                logger.warning(f"检测到NaN值在列 {col} 中")
+                return True
+        
+        return False
+    
+    def _dataframe_to_cache_json(self, df: pd.DataFrame) -> str:
+        """
+        将DataFrame转换为可缓存的JSON字符串
+        
+        Args:
+            df: 要转换的DataFrame
+            
+        Returns:
+            JSON字符串
+        """
+        # 将日期转换为字符串
+        df_copy = df.copy()
+        df_copy['date'] = df_copy['date'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # 转换为字典列表
+        records = df_copy.to_dict('records')
+        return json.dumps(records, ensure_ascii=False)
+    
+    def _cache_json_to_dataframe(self, json_str: str) -> Optional[pd.DataFrame]:
+        """
+        将缓存的JSON字符串转换为DataFrame
+        
+        Args:
+            json_str: JSON字符串
+            
+        Returns:
+            DataFrame或None
+        """
+        try:
+            records = json.loads(json_str)
+            df = pd.DataFrame(records)
+            
+            # 转换日期格式
+            df['date'] = pd.to_datetime(df['date'])
+            
+            return df
+        except Exception as e:
+            logger.error(f"缓存JSON转换为DataFrame失败: {e}")
+            return None
         
     async def __aenter__(self):
         return self
@@ -138,19 +204,50 @@ class DataCollector:
         self, 
         code: str, 
         ktype: str = "day",
-        limit: int = 500
+        limit: int = 500,
+        use_cache: bool = True
     ) -> Optional[pd.DataFrame]:
         """
-        获取K线数据
+        获取K线数据（支持缓存）
         
         Args:
             code: 股票代码 (如: 000001)
             ktype: K线类型 (day=日线, week=周线, month=月线)
             limit: 获取条数
+            use_cache: 是否使用缓存
         """
+        normalized_code = self._normalize_code(code)
+        
+        # 尝试从缓存获取
+        if use_cache and self.db and self.settings.enable_kline_cache:
+            try:
+                cached_json = self.db.get_kline_cache(normalized_code, ktype)
+                if cached_json:
+                    cached_df = self._cache_json_to_dataframe(cached_json)
+                    if cached_df is not None and len(cached_df) > 0:
+                        logger.debug(f"从缓存加载 {code} {ktype} 数据，共 {len(cached_df)} 条")
+                        # 限制条数
+                        if limit and len(cached_df) > limit:
+                            cached_df = cached_df.tail(limit).reset_index(drop=True)
+                        
+                        # 获取实时行情修正最新价格
+                        try:
+                            quote = await self.get_realtime_quote(code)
+                            if quote and len(cached_df) > 0:
+                                actual_close = quote.get('close', 0)
+                                if actual_close > 0:
+                                    old_close = cached_df.iloc[-1]['close']
+                                    cached_df.iloc[-1, cached_df.columns.get_loc('close')] = actual_close
+                                    logger.debug(f"{code} 价格修正（缓存）: {old_close:.2f} -> {actual_close:.2f}")
+                        except Exception as e:
+                            logger.warning(f"修正{code}最新价格失败（缓存）: {e}")
+                        
+                        return cached_df
+            except Exception as e:
+                logger.warning(f"读取缓存失败 {code} {ktype}: {e}")
+        
+        # 缓存未命中或缓存禁用，从API获取
         try:
-            normalized_code = self._normalize_code(code)
-            
             # 使用 /api/kline 接口
             params = {
                 "code": normalized_code,
@@ -170,6 +267,25 @@ class DataCollector:
             if df is None or len(df) == 0:
                 logger.warning(f"解析{code}数据失败")
                 return None
+            
+            # 检查是否存在NaN值
+            if self._check_dataframe_has_nan(df):
+                logger.warning(f"{code} {ktype} 数据存在异常值（NaN），不缓存")
+            else:
+                # 保存到缓存
+                if self.db and self.settings.enable_kline_cache:
+                    try:
+                        cache_json = self._dataframe_to_cache_json(df)
+                        record_count = len(df)
+                        self.db.save_kline_cache(
+                            stock_code=normalized_code,
+                            ktype=ktype,
+                            data_json=cache_json,
+                            record_count=record_count,
+                            ttl_hours=self.settings.kline_cache_ttl
+                        )
+                    except Exception as e:
+                        logger.warning(f"保存缓存失败 {code} {ktype}: {e}")
             
             # 限制条数
             if limit and len(df) > limit:

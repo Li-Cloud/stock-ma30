@@ -87,6 +87,20 @@ class ScanDatabase:
                 )
             ''')
             
+            # K线数据缓存表
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS kline_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    stock_code TEXT NOT NULL,
+                    ktype TEXT NOT NULL,
+                    data TEXT NOT NULL,
+                    record_count INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL,
+                    UNIQUE(stock_code, ktype)
+                )
+            ''')
+            
             # 创建索引
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_scan_date ON scan_records(scan_date)
@@ -96,6 +110,12 @@ class ScanDatabase:
             ''')
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_batch_id ON scan_records(scan_batch_id)
+            ''')
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_kline_stock ON kline_cache(stock_code)
+            ''')
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_kline_expires ON kline_cache(expires_at)
             ''')
             
             conn.commit()
@@ -369,6 +389,131 @@ class ScanDatabase:
         
         logger.info(f"删除旧记录: {records_deleted} 条扫描记录, {stats_deleted} 条统计记录")
         return records_deleted + stats_deleted
+    
+    def save_kline_cache(
+        self,
+        stock_code: str,
+        ktype: str,
+        data_json: str,
+        record_count: int,
+        ttl_hours: int = 24
+    ) -> bool:
+        """
+        保存K线数据到缓存
+        
+        Args:
+            stock_code: 股票代码
+            ktype: K线类型 (day/week/month)
+            data_json: K线数据的JSON字符串
+            record_count: 数据记录数
+            ttl_hours: 缓存有效期（小时）
+            
+        Returns:
+            是否保存成功
+        """
+        from datetime import timedelta
+        
+        expires_at = datetime.now() + timedelta(hours=ttl_hours)
+        
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            try:
+                # 使用REPLACE INTO实现插入或更新
+                cursor.execute('''
+                    REPLACE INTO kline_cache 
+                    (stock_code, ktype, data, record_count, created_at, expires_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+                ''', (stock_code, ktype, data_json, record_count, expires_at.strftime('%Y-%m-%d %H:%M:%S')))
+                
+                conn.commit()
+                logger.debug(f"K线缓存已保存: {stock_code} {ktype}, {record_count} 条记录, 有效期 {ttl_hours} 小时")
+                return True
+            except Exception as e:
+                logger.error(f"保存K线缓存失败 {stock_code} {ktype}: {e}")
+                return False
+    
+    def get_kline_cache(
+        self,
+        stock_code: str,
+        ktype: str
+    ) -> Optional[str]:
+        """
+        从缓存获取K线数据
+        
+        Args:
+            stock_code: 股票代码
+            ktype: K线类型
+            
+        Returns:
+            缓存的JSON数据，如果不存在或已过期则返回None
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            try:
+                cursor.execute('''
+                    SELECT data, expires_at FROM kline_cache
+                    WHERE stock_code = ? AND ktype = ? AND expires_at > CURRENT_TIMESTAMP
+                ''', (stock_code, ktype))
+                
+                row = cursor.fetchone()
+                
+                if row:
+                    logger.debug(f"K线缓存命中: {stock_code} {ktype}")
+                    return row[0]
+                else:
+                    logger.debug(f"K线缓存未命中: {stock_code} {ktype}")
+                    return None
+            except Exception as e:
+                logger.error(f"获取K线缓存失败 {stock_code} {ktype}: {e}")
+                return None
+    
+    def clear_expired_cache(self) -> int:
+        """
+        清理过期的缓存数据
+        
+        Returns:
+            清理的记录数
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            try:
+                cursor.execute('''
+                    DELETE FROM kline_cache WHERE expires_at <= CURRENT_TIMESTAMP
+                ''')
+                deleted = cursor.rowcount
+                conn.commit()
+                
+                if deleted > 0:
+                    logger.info(f"清理过期缓存: {deleted} 条记录")
+                
+                return deleted
+            except Exception as e:
+                logger.error(f"清理过期缓存失败: {e}")
+                return 0
+    
+    def clear_all_cache(self) -> int:
+        """
+        清理所有缓存数据
+        
+        Returns:
+            清理的记录数
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            try:
+                cursor.execute('DELETE FROM kline_cache')
+                deleted = cursor.rowcount
+                conn.commit()
+                
+                logger.info(f"清理所有缓存: {deleted} 条记录")
+                return deleted
+            except Exception as e:
+                logger.error(f"清理所有缓存失败: {e}")
+                return 0
 
 
 # 全局数据库实例

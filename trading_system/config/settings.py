@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     schedule_day: int = Field(default=5, alias="SCHEDULE_DAY")  # 周五
     schedule_time: str = Field(default="15:30", alias="SCHEDULE_TIME")
     
+    # 缓存配置
+    enable_kline_cache: bool = Field(default=True, alias="ENABLE_KLINE_CACHE")
+    kline_cache_ttl: int = Field(default=24, alias="KLINE_CACHE_TTL")  # 缓存有效期（小时）
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

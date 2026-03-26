@@ -12,6 +12,7 @@
 - **智能提醒系统**：支持钉钉/飞书webhook实时推送
 - **AI分析集成**：调用OpenAI兼容大模型进行市场分析
 - **Web管理后台**：基于React的可视化监控面板
+- **K线数据缓存**：智能缓存机制，减少API调用，提升扫描速度
 
 ### 技术栈
 
@@ -230,12 +231,28 @@ npm run preview
 - 获取实时行情（五档买卖盘口）
 - 获取K线数据（支持日/周/月等周期）
 - 计算技术指标（30周均线、成交量比率等）
+- **智能缓存机制**：自动缓存K线数据，减少API调用
+- **异常数据检测**：自动检测NaN值，异常数据不缓存
+
+**缓存特性**：
+- 首次获取数据后自动保存到本地数据库
+- 默认24小时自动过期，可配置
+- 使用缓存时自动从实时行情更新最新价格
+- 支持灵活配置（启用/禁用缓存）
 
 **关键方法**：
 ```python
-async def get_kline_data(code: str, kline_type: str = 'day')
+async def get_kline_data(code: str, kline_type: str = 'day', use_cache: bool = True)
 async def get_realtime_quote(code: str)
-async def calculate_ma30_week(df: pd.DataFrame)
+def _check_dataframe_has_nan(df: pd.DataFrame) -> bool
+def _dataframe_to_cache_json(df: pd.DataFrame) -> str
+def _cache_json_to_dataframe(json_str: str) -> Optional[pd.DataFrame]
+```
+
+**缓存配置**：
+```env
+ENABLE_KLINE_CACHE=true      # 是否启用缓存
+KLINE_CACHE_TTL=24           # 缓存有效期（小时）
 ```
 
 ### 2. PhaseAnalyzer (core/phase_analyzer.py)
@@ -361,6 +378,54 @@ async def analyze_stock(result: AnalysisResult, context: MarketContext)
 async def generate_report(signals: List[TradeSignal])
 ```
 
+### 8. ScanDatabase (models/database.py)
+
+数据库管理模块，负责数据的持久化存储和缓存管理。
+
+**主要功能**：
+- 扫描结果存储
+- 扫描统计记录
+- **K线数据缓存管理**
+- 历史数据查询
+
+**缓存管理**：
+- `kline_cache` 表：存储K线数据缓存
+- 自动过期机制
+- 异常数据过滤
+
+**关键方法**：
+```python
+# 缓存管理
+def save_kline_cache(stock_code: str, ktype: str, data_json: str, record_count: int, ttl_hours: int = 24) -> bool
+def get_kline_cache(stock_code: str, ktype: str) -> Optional[str]
+def clear_expired_cache() -> int
+def clear_all_cache() -> int
+
+# 扫描记录
+def save_scan_results(stocks: List[Dict], filter_config: Dict, statistics: Dict, duration_seconds: int = 0) -> str
+def get_scan_history(start_date: str = None, end_date: str = None, stock_code: str = None, limit: int = 100) -> List[Dict]
+def get_latest_scan_results(stock_code: str = None) -> List[Dict]
+
+# 统计分析
+def get_scan_statistics(start_date: str = None, end_date: str = None, limit: int = 30) -> List[Dict]
+def get_stock_appearance_count(start_date: str = None, end_date: str = None, min_appearances: int = 2) -> List[Dict]
+```
+
+**数据库表结构**：
+- `scan_records`: 扫描记录表
+- `scan_statistics`: 扫描统计表
+- `kline_cache`: K线数据缓存表
+
+**缓存流程**：
+```
+请求K线数据 → 检查缓存 → 缓存命中？直接返回
+                          ↓
+                     缓存未命中 → 调用API获取 → 检测NaN
+                                                ↓
+                                      无NaN → 保存到缓存 → 返回数据
+                                      有NaN → 不缓存 → 返回数据
+```
+
 ---
 
 ## API接口文档
@@ -444,6 +509,10 @@ SCHEDULE_TIME=15:30
 # 系统配置
 DATA_DIR=./data
 LOG_LEVEL=INFO
+
+# 缓存配置
+ENABLE_KLINE_CACHE=true      # 是否启用K线数据缓存
+KLINE_CACHE_TTL=24           # 缓存有效期（小时）
 ```
 
 ---
@@ -601,6 +670,59 @@ A: 这是数据问题，可能原因：
 - 阶段分析可能不准确
 - 建议观察一段时间后再分析
 
+### Q: 如何清理K线数据缓存？
+
+A: 可以通过以下方式清理缓存：
+
+**方式1：使用数据库方法**
+```python
+from models.database import get_scan_db
+
+db = get_scan_db()
+
+# 清理过期缓存
+db.clear_expired_cache()
+
+# 清理所有缓存
+db.clear_all_cache()
+```
+
+**方式2：直接操作数据库**
+```bash
+cd trading_system/data
+sqlite3 scan_history.db
+
+# 清理过期缓存
+DELETE FROM kline_cache WHERE expires_at <= datetime('now');
+
+# 清理所有缓存
+DELETE FROM kline_cache;
+```
+
+**方式3：禁用缓存**
+在 `.env` 文件中设置：
+```env
+ENABLE_KLINE_CACHE=false
+```
+
+### Q: 缓存数据会自动更新吗？
+
+A: 会。每次使用缓存数据时，系统会：
+1. 从缓存读取历史K线数据
+2. 调用实时行情API获取最新价格
+3. 用最新价格替换缓存中的最后一根K线收盘价
+4. 返回更新后的数据
+
+这样可以确保使用的是最新价格，同时减少API调用次数。
+
+### Q: 缓存占用多少空间？
+
+A: 缓存数据存储在SQLite数据库中，单个股票的K线数据（150周）大约占用：
+- 日线：约10-15KB
+- 周线：约2-3KB
+
+假设缓存1000只股票的周线数据，大约需要2-3MB空间。可以定期清理过期缓存来控制空间占用。
+
 ---
 
 ## 理论基础
@@ -679,4 +801,4 @@ Copyright (c) 2024 30周均线交易系统
 
 ---
 
-**最后更新**: 2026-03-25
+**最后更新**: 2026-03-26
