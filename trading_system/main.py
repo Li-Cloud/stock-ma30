@@ -454,6 +454,14 @@ async def scan_market(
         generate_signals: 是否生成交易信号（默认True）
     """
     global scan_progress
+    
+    # 检查是否已有扫描在进行
+    if scan_progress.get("is_scanning", False):
+        raise HTTPException(
+            status_code=409,
+            detail=f"已有扫描任务在进行中，请等待当前扫描完成后再试。已扫描 {scan_progress.get('processed_stocks', 0)}/{scan_progress.get('total_stocks', 0)} 只股票，发现 {scan_progress.get('phase2_found', 0)} 只第二阶段股票。"
+        )
+    
     start_time = time.time()
 
     try:
