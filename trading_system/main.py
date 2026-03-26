@@ -5,6 +5,7 @@
 import asyncio
 import sys
 import time
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -13,11 +14,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from loguru import logger
 
+# 设置时区为北京时间
+os.environ['TZ'] = 'Asia/Shanghai'
+time.tzset()
+
 from config import get_settings
 from scheduler import TaskScheduler, run_analysis_task, TradingSystem
 from services import MultiNotifier, AIAnalyzer
 from core import DataCollector, PhaseAnalyzer
-
 
 # 配置日志
 logger.remove()
@@ -28,6 +32,7 @@ logger.add(
 )
 logger.add(
     "logs/trading_system.log",
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
     rotation="500 MB",
     retention="10 days",
     level="DEBUG"
