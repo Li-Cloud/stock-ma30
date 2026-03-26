@@ -461,6 +461,11 @@ class StockScanner:
             
             logger.info(f"[{code}] 获取数据成功，共 {len(df)} 周数据")
             
+            # 计算技术指标（MA30和成交量均线）
+            df = df.copy()
+            df["ma30"] = self.phase_analyzer.calculate_ma30(df)
+            df["volume_ma"] = df["volume"].rolling(window=10).mean()
+            
             # 分析阶段
             phase, metrics = self.phase_analyzer.analyze_phase(df)
             
