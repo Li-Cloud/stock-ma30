@@ -13,7 +13,7 @@ import {
   ArrowDownRight,
   Loader2
 } from 'lucide-react'
-import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, AreaChart, Area, ReferenceLine } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, AreaChart, Area, ReferenceLine, BarChart, Bar, Tooltip, CartesianGrid, Legend } from 'recharts'
 import { getStockAnalysis } from '../api/client'
 
 interface StockDetailProps {
@@ -27,6 +27,17 @@ interface StockData {
   current_price: number
   ma30_week: number
   phase: string
+  weekly_data: Array<{
+    date: string | null
+    open: number
+    high: number
+    low: number
+    close: number
+    volume: number
+    amount: number
+    ma30_week: number | null
+    volume_ma: number | null
+  }>
   signals: Array<{
     type: string
     current_price: number
@@ -123,12 +134,15 @@ export default function StockDetail({ stockCode, onClose }: StockDetailProps) {
   const ma30 = stockData.ma30_week || signal?.ma30_week || 0
   const volumeRatio = signal?.volume_ratio || 1.0
 
-  // 构建图表数据
-  const chartData = [
-    { date: '前期', price: ma30 * 0.9, ma30: ma30 * 0.95 },
-    { date: '近期', price: ma30 * 0.95, ma30: ma30 * 0.98 },
-    { date: '当前', price: currentPrice, ma30: ma30 },
-  ]
+  // 使用真实的历史K线数据
+  const chartData = stockData.weekly_data
+    .filter(data => data.date !== null)
+    .map(data => ({
+      date: new Date(data.date!).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }),
+      price: data.close,
+      ma30: data.ma30_week || 0,
+      volume: data.volume
+    }))
 
   return (
     <motion.div
@@ -263,6 +277,41 @@ export default function StockDetail({ stockCode, onClose }: StockDetailProps) {
                 <span className="w-3 h-3 rounded-full bg-emerald-500"></span>
                 <span className="text-sm text-gray-400">30周均线</span>
               </div>
+            </div>
+          </motion.div>
+
+          {/* Volume Chart */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+            className="glass-card p-6"
+          >
+            <h3 className="text-lg font-semibold text-white mb-4">成交量</h3>
+            <div className="h-48">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#475569" vertical={false} />
+                  <XAxis dataKey="date" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: '#1e293b', 
+                      border: '1px solid #475569', 
+                      borderRadius: '8px' 
+                    }}
+                    labelStyle={{ color: '#94a3b8' }}
+                    itemStyle={{ color: '#f8fafc' }}
+                    formatter={(value: number) => [`${(value / 10000).toFixed(0)}万`, '成交量']}
+                  />
+                  <Bar 
+                    dataKey="volume" 
+                    fill="#6366f1"
+                    radius={[2, 2, 0, 0]}
+                    opacity={0.8}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           </motion.div>
 

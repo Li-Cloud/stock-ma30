@@ -14,7 +14,7 @@ from core import DataCollector, PhaseAnalyzer, SignalGenerator, RiskManager
 from services import MultiNotifier, AIAnalyzer
 from models import (
     TradeSignal, AnalysisResult, MarketContext, 
-    StockPhase, PhaseMetrics, AIAnalysisResponse
+    StockPhase, PhaseMetrics, AIAnalysisResponse, StockData
 )
 
 
@@ -79,6 +79,24 @@ class TradingSystem:
                     signal.current_price
                 )
             
+            # 6. 构建历史数据列表（最近100周）
+            weekly_data = []
+            recent_df = df.tail(100)  # 只返回最近100周数据，减少数据量
+            for idx, row in recent_df.iterrows():
+                weekly_data.append(StockData(
+                    code=stock_code,
+                    name=stock_name or stock_code,
+                    date=idx,
+                    open=row['open'],
+                    high=row['high'],
+                    low=row['low'],
+                    close=row['close'],
+                    volume=row['volume'],
+                    amount=row['amount'],
+                    ma30_week=row['ma30'] if 'ma30' in row else None,
+                    volume_ma=row['volume_ma'] if 'volume_ma' in row else None
+                ))
+            
             # 构建结果
             result = AnalysisResult(
                 stock_code=stock_code,
@@ -86,11 +104,11 @@ class TradingSystem:
                 phase=phase,
                 metrics=metrics,
                 signals=signals,
-                weekly_data=[],  # 不存储原始数据，节省内存
+                weekly_data=weekly_data,
                 analysis_date=datetime.now()
             )
             
-            logger.info(f"{stock_code} 分析完成，阶段: {phase.name}")
+            logger.info(f"{stock_code} 分析完成，阶段: {phase.name}，历史数据: {len(weekly_data)} 周")
             return result
             
         except Exception as e:

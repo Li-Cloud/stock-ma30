@@ -63,7 +63,14 @@ class DataCollector:
         """
         # 将日期转换为字符串
         df_copy = df.copy()
-        df_copy['date'] = df_copy['date'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        # 检查date列是否为datetime类型
+        if pd.api.types.is_datetime64_any_dtype(df_copy['date']):
+            # 处理时区问题
+            df_copy['date'] = df_copy['date'].dt.tz_localize(None) if df_copy['date'].dt.tz is not None else df_copy['date']
+            df_copy['date'] = df_copy['date'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            # 如果已经是字符串，确保格式正确
+            df_copy['date'] = pd.to_datetime(df_copy['date'], utc=True).dt.tz_localize(None).dt.strftime('%Y-%m-%d %H:%M:%S')
         
         # 转换为字典列表
         records = df_copy.to_dict('records')
@@ -208,7 +215,7 @@ class DataCollector:
         use_cache: bool = True
     ) -> Optional[pd.DataFrame]:
         """
-        获取K线数据（支持缓存）
+        获取K线数据（支持智能缓存）
         
         Args:
             code: 股票代码 (如: 000001)
@@ -226,23 +233,63 @@ class DataCollector:
                     cached_df = self._cache_json_to_dataframe(cached_json)
                     if cached_df is not None and len(cached_df) > 0:
                         logger.debug(f"从缓存加载 {code} {ktype} 数据，共 {len(cached_df)} 条")
-                        # 限制条数
-                        if limit and len(cached_df) > limit:
-                            cached_df = cached_df.tail(limit).reset_index(drop=True)
                         
-                        # 获取实时行情修正最新价格
+                        # 检查缓存是否需要更新
+                        should_update = False
+                        update_reason = ""
+                        
+                        # 1. 检查缓存最新日期
+                        last_date = cached_df.iloc[-1]['date']
+                        today = datetime.now().date()
+                        
+                        # 获取实时行情
                         try:
                             quote = await self.get_realtime_quote(code)
-                            if quote and len(cached_df) > 0:
+                            if quote:
                                 actual_close = quote.get('close', 0)
-                                if actual_close > 0:
-                                    old_close = cached_df.iloc[-1]['close']
-                                    cached_df.iloc[-1, cached_df.columns.get_loc('close')] = actual_close
-                                    logger.debug(f"{code} 价格修正（缓存）: {old_close:.2f} -> {actual_close:.2f}")
+                                
+                                # 检查日期是否过期（对于日线，如果不是今天则需要更新）
+                                if ktype == "day":
+                                    if last_date.date() < today:
+                                        should_update = True
+                                        update_reason = f"缓存数据日期过旧（{last_date.strftime('%Y-%m-%d')} < {today}）"
+                                # 对于周线，如果本周有新交易日则需要更新
+                                elif ktype == "week":
+                                    last_week_end = last_date + timedelta(days=6 - last_date.weekday())
+                                    if last_week_end.date() < today:
+                                        should_update = True
+                                        update_reason = f"周线数据需要更新（{last_week_end.strftime('%Y-%m-%d')} < {today}）"
+                                
+                                # 2. 检查价格差异（如果差异超过1%，需要更新）
+                                if not should_update and actual_close > 0:
+                                    cached_close = cached_df.iloc[-1]['close']
+                                    price_diff_pct = abs(actual_close - cached_close) / cached_close * 100
+                                    if price_diff_pct > 1.0:
+                                        should_update = True
+                                        update_reason = f"价格差异过大（{price_diff_pct:.2f}% > 1%）"
+                                
+                                # 如果需要更新，则重新获取数据
+                                if should_update:
+                                    logger.info(f"{code} {ktype} 缓存需要更新: {update_reason}")
+                                    # 继续执行下面的API获取逻辑
+                                else:
+                                    # 只修正最后一根K线的价格
+                                    if actual_close > 0:
+                                        old_close = cached_df.iloc[-1]['close']
+                                        cached_df.iloc[-1, cached_df.columns.get_loc('close')] = actual_close
+                                        logger.debug(f"{code} 价格修正（缓存）: {old_close:.2f} -> {actual_close:.2f}")
+                                    
+                                    # 限制条数
+                                    if limit and len(cached_df) > limit:
+                                        cached_df = cached_df.tail(limit).reset_index(drop=True)
+                                    
+                                    return cached_df
                         except Exception as e:
-                            logger.warning(f"修正{code}最新价格失败（缓存）: {e}")
-                        
-                        return cached_df
+                            logger.warning(f"获取{code}实时行情失败，使用缓存数据: {e}")
+                            # 即使获取实时行情失败，也返回缓存数据
+                            if limit and len(cached_df) > limit:
+                                cached_df = cached_df.tail(limit).reset_index(drop=True)
+                            return cached_df
             except Exception as e:
                 logger.warning(f"读取缓存失败 {code} {ktype}: {e}")
         

@@ -475,6 +475,9 @@ class StockScanner:
             # 准备MA30显示值
             ma30_display = f"{latest['ma30']:.2f}" if 'ma30' in latest else "N/A"
             
+            # 计算成交量比率
+            volume_ratio = latest["volume"] / latest["volume_ma"] if "volume_ma" in latest and latest["volume_ma"] > 0 else 1.0
+            
             logger.info(
                 f"[{code}] 阶段分析完成 - "
                 f"阶段: {phase.name} | "
@@ -482,7 +485,7 @@ class StockScanner:
                 f"MA30: ¥{ma30_display} | "
                 f"均线方向: {metrics.ma30_direction} | "
                 f"斜率: {metrics.ma30_slope:.4f} | "
-                f"成交量比率: {metrics.volume_ratio:.2f}x"
+                f"成交量比率: {volume_ratio:.2f}x"
             )
             
             # 只返回第二阶段股票详情
@@ -492,6 +495,9 @@ class StockScanner:
             
             logger.info(f"[{code}] ✓ 确认为第二阶段股票")
             
+            # 计算成交量比率
+            volume_ratio_value = round(latest["volume"] / latest["volume_ma"], 2) if "volume_ma" in latest else 1.0
+            
             # 构建结果
             result = {
                 "code": code,
@@ -500,7 +506,7 @@ class StockScanner:
                 "current_price": round(latest["close"], 2),
                 "ma30": round(latest["ma30"], 2) if "ma30" in latest else None,
                 "trend_strength": round(metrics.ma30_slope, 4),
-                "volume_ratio": round(latest["volume"] / latest["volume_ma"], 2) if "volume_ma" in latest else 1.0,
+                "volume_ratio": volume_ratio_value,
                 "weeks_in_phase2": self._count_weeks_in_phase2(df),
                 "breakout_confirmed": metrics.breakout_confirmed
             }
@@ -509,7 +515,7 @@ class StockScanner:
                 f"[{code}] 第二阶段详情 - "
                 f"价格/MA30: {latest['close']:.2f}/{ma30_display} | "
                 f"趋势强度: {metrics.ma30_slope:.4f} | "
-                f"成交量: {metrics.volume_ratio:.2f}x | "
+                f"成交量: {volume_ratio_value:.2f}x | "
                 f"突破确认: {'是' if metrics.breakout_confirmed else '否'} | "
                 f"持续周数: {result['weeks_in_phase2']}"
             )

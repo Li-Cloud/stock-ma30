@@ -31,10 +31,10 @@ logger.add(
     level="INFO"
 )
 logger.add(
-    "logs/trading_system.log",
+    "logs/trading_system_{time:YYYY-MM-DD}.log",
     format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
-    rotation="500 MB",
-    retention="10 days",
+    rotation="00:00",  # 每天午夜轮转
+    retention="30 days",  # 保留30天的日志
     level="DEBUG"
 )
 
@@ -205,6 +205,20 @@ async def analyze_single_stock_get(stock_code: str):
             "phase": result.phase.name,
             "current_price": result.signals[0].current_price if result.signals else None,
             "ma30_week": result.signals[0].ma30_week if result.signals else None,
+            "weekly_data": [
+                {
+                    "date": data.date.isoformat() if data.date else None,
+                    "open": data.open,
+                    "high": data.high,
+                    "low": data.low,
+                    "close": data.close,
+                    "volume": data.volume,
+                    "amount": data.amount,
+                    "ma30_week": data.ma30_week,
+                    "volume_ma": data.volume_ma
+                }
+                for data in result.weekly_data
+            ],
             "signals": [
                 {
                     "type": s.signal_type.value,
