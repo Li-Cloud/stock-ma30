@@ -76,6 +76,10 @@ export default function MarketScan() {
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'scan' | 'history' | 'persistent'>('scan')
 
+  // 排序状态
+  const [sortBy, setSortBy] = useState<string>('trend_strength')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+
   // 扫描进度状态
   const [scanProgress, setScanProgress] = useState<any>(null)
   
@@ -83,11 +87,15 @@ export default function MarketScan() {
   const [historyRecords, setHistoryRecords] = useState<ScanRecord[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyDateFilter, setHistoryDateFilter] = useState<'7' | '30' | '90' | 'all'>('7')
+  const [historySortBy, setHistorySortBy] = useState<string>('scan_date')
+  const [historySortOrder, setHistorySortOrder] = useState<'asc' | 'desc'>('desc')
   
   // 持续强势股
   const [persistentStocks, setPersistentStocks] = useState<PersistentStock[]>([])
   const [persistentLoading, setPersistentLoading] = useState(false)
   const [minDays, setMinDays] = useState(3)
+  const [persistentSortBy, setPersistentSortBy] = useState<string>('appearance_count')
+  const [persistentSortOrder, setPersistentSortOrder] = useState<'asc' | 'desc'>('desc')
   
   // 筛选配置
   const [filters, setFilters] = useState({
@@ -106,6 +114,36 @@ export default function MarketScan() {
       }
     } catch (err: any) {
       console.error('获取统计失败:', err)
+    }
+  }
+
+  // 排序函数
+  const sortStocks = <T extends Record<string, any>>(data: T[], key: string, order: 'asc' | 'desc'): T[] => {
+    return [...data].sort((a, b) => {
+      const aVal = a[key]
+      const bVal = b[key]
+
+      if (aVal === null || aVal === undefined) return 1
+      if (bVal === null || bVal === undefined) return -1
+
+      let comparison = 0
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        comparison = aVal - bVal
+      } else if (typeof aVal === 'string' && typeof bVal === 'string') {
+        comparison = aVal.localeCompare(bVal)
+      }
+
+      return order === 'asc' ? comparison : -comparison
+    })
+  }
+
+  // 处理排序变更
+  const handleSortChange = (key: string) => {
+    if (sortBy === key) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortBy(key)
+      setSortOrder('desc')
     }
   }
 
@@ -544,21 +582,77 @@ export default function MarketScan() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="text-left border-b border-white/10">
-                    <th className="pb-4 text-gray-400 font-medium text-sm">股票代码</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">股票名称</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">当前价格</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">30周均线</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">趋势强度</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">进入阶段</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">突破确认</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {stocks.map((stock, index) => (
+            <div>
+              {/* 排序控制 */}
+              <div className="flex items-center gap-3 mb-4">
+                <Filter className="w-4 h-4 text-gray-400" />
+                <span className="text-sm text-gray-400">排序方式:</span>
+                <select
+                  value={sortBy}
+                  onChange={(e) => handleSortChange(e.target.value)}
+                  className="bg-white/5 text-white text-sm border border-white/20 rounded-lg px-3 py-2 focus:outline-none focus:border-primary"
+                >
+                  <option value="trend_strength">趋势强度</option>
+                  <option value="current_price">当前价格</option>
+                  <option value="ma30">30周均线</option>
+                  <option value="volume_ratio">成交量比率</option>
+                  <option value="weeks_in_phase2">进入阶段周数</option>
+                  <option value="code">股票代码</option>
+                  <option value="name">股票名称</option>
+                </select>
+                <button
+                  onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                  className="flex items-center gap-1 px-3 py-2 bg-white/5 text-white text-sm rounded-lg hover:bg-white/10 transition-colors"
+                >
+                  {sortOrder === 'asc' ? '↑ 升序' : '↓ 降序'}
+                </button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="text-left border-b border-white/10">
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSortChange('code')}
+                      >
+                        股票代码 {sortBy === 'code' && (sortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSortChange('name')}
+                      >
+                        股票名称 {sortBy === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSortChange('current_price')}
+                      >
+                        当前价格 {sortBy === 'current_price' && (sortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSortChange('ma30')}
+                      >
+                        30周均线 {sortBy === 'ma30' && (sortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSortChange('trend_strength')}
+                      >
+                        趋势强度 {sortBy === 'trend_strength' && (sortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => handleSortChange('weeks_in_phase2')}
+                      >
+                        进入阶段 {sortBy === 'weeks_in_phase2' && (sortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th className="pb-4 text-gray-400 font-medium text-sm">突破确认</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {sortStocks(stocks, sortBy, sortOrder).map((stock, index) => (
                     <motion.tr
                       key={stock.code}
                       initial={{ opacity: 0, x: -20 }}
@@ -608,6 +702,7 @@ export default function MarketScan() {
                 </tbody>
               </table>
             </div>
+            </div>
           )}
         </motion.div>
       )}
@@ -653,21 +748,134 @@ export default function MarketScan() {
               <p className="text-sm text-gray-500 mt-2">扫描结果会自动保存到数据库</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="text-left border-b border-white/10">
-                    <th className="pb-4 text-gray-400 font-medium text-sm">扫描日期</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">股票代码</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">股票名称</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">价格</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">30周均线</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">趋势强度</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">持续周数</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {historyRecords.map((record) => (
+            <div>
+              {/* 排序控制 */}
+              <div className="flex items-center gap-3 mb-4">
+                <Filter className="w-4 h-4 text-gray-400" />
+                <span className="text-sm text-gray-400">排序方式:</span>
+                <select
+                  value={historySortBy}
+                  onChange={(e) => {
+                    setHistorySortBy(e.target.value)
+                    setHistorySortOrder('desc')
+                  }}
+                  className="bg-white/5 text-white text-sm border border-white/20 rounded-lg px-3 py-2 focus:outline-none focus:border-primary"
+                >
+                  <option value="scan_date">扫描日期</option>
+                  <option value="stock_code">股票代码</option>
+                  <option value="stock_name">股票名称</option>
+                  <option value="current_price">价格</option>
+                  <option value="ma30">30周均线</option>
+                  <option value="trend_strength">趋势强度</option>
+                  <option value="weeks_in_phase2">持续周数</option>
+                </select>
+                <button
+                  onClick={() => setHistorySortOrder(historySortOrder === 'asc' ? 'desc' : 'asc')}
+                  className="flex items-center gap-1 px-3 py-2 bg-white/5 text-white text-sm rounded-lg hover:bg-white/10 transition-colors"
+                >
+                  {historySortOrder === 'asc' ? '↑ 升序' : '↓ 降序'}
+                </button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="text-left border-b border-white/10">
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => {
+                          if (historySortBy === 'scan_date') {
+                            setHistorySortOrder(historySortOrder === 'asc' ? 'desc' : 'asc')
+                          } else {
+                            setHistorySortBy('scan_date')
+                            setHistorySortOrder('desc')
+                          }
+                        }}
+                      >
+                        扫描日期 {historySortBy === 'scan_date' && (historySortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => {
+                          if (historySortBy === 'stock_code') {
+                            setHistorySortOrder(historySortOrder === 'asc' ? 'desc' : 'asc')
+                          } else {
+                            setHistorySortBy('stock_code')
+                            setHistorySortOrder('desc')
+                          }
+                        }}
+                      >
+                        股票代码 {historySortBy === 'stock_code' && (historySortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => {
+                          if (historySortBy === 'stock_name') {
+                            setHistorySortOrder(historySortOrder === 'asc' ? 'desc' : 'asc')
+                          } else {
+                            setHistorySortBy('stock_name')
+                            setHistorySortOrder('desc')
+                          }
+                        }}
+                      >
+                        股票名称 {historySortBy === 'stock_name' && (historySortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => {
+                          if (historySortBy === 'current_price') {
+                            setHistorySortOrder(historySortOrder === 'asc' ? 'desc' : 'asc')
+                          } else {
+                            setHistorySortBy('current_price')
+                            setHistorySortOrder('desc')
+                          }
+                        }}
+                      >
+                        价格 {historySortBy === 'current_price' && (historySortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => {
+                          if (historySortBy === 'ma30') {
+                            setHistorySortOrder(historySortOrder === 'asc' ? 'desc' : 'asc')
+                          } else {
+                            setHistorySortBy('ma30')
+                            setHistorySortOrder('desc')
+                          }
+                        }}
+                      >
+                        30周均线 {historySortBy === 'ma30' && (historySortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => {
+                          if (historySortBy === 'trend_strength') {
+                            setHistorySortOrder(historySortOrder === 'asc' ? 'desc' : 'asc')
+                          } else {
+                            setHistorySortBy('trend_strength')
+                            setHistorySortOrder('desc')
+                          }
+                        }}
+                      >
+                        趋势强度 {historySortBy === 'trend_strength' && (historySortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => {
+                          if (historySortBy === 'weeks_in_phase2') {
+                            setHistorySortOrder(historySortOrder === 'asc' ? 'desc' : 'asc')
+                          } else {
+                            setHistorySortBy('weeks_in_phase2')
+                            setHistorySortOrder('desc')
+                          }
+                        }}
+                      >
+                        持续周数 {historySortBy === 'weeks_in_phase2' && (historySortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {sortStocks(historyRecords, historySortBy, historySortOrder).map((record) => (
                     <tr key={record.id} className="hover:bg-white/5 transition-colors">
                       <td className="py-4 text-gray-400 text-sm">
                         {record.scan_date}
@@ -695,6 +903,7 @@ export default function MarketScan() {
                 </tbody>
               </table>
             </div>
+          </div>
           )}
         </motion.div>
       )}
@@ -749,20 +958,107 @@ export default function MarketScan() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="text-left border-b border-white/10">
-                    <th className="pb-4 text-gray-400 font-medium text-sm">股票代码</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">股票名称</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">出现天数</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">平均价格</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">平均趋势强度</th>
-                    <th className="pb-4 text-gray-400 font-medium text-sm">持续性评级</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {persistentStocks.map((stock) => (
+            <div>
+              {/* 排序控制 */}
+              <div className="flex items-center gap-3 mb-4">
+                <Filter className="w-4 h-4 text-gray-400" />
+                <span className="text-sm text-gray-400">排序方式:</span>
+                <select
+                  value={persistentSortBy}
+                  onChange={(e) => {
+                    setPersistentSortBy(e.target.value)
+                    setPersistentSortOrder('desc')
+                  }}
+                  className="bg-white/5 text-white text-sm border border-white/20 rounded-lg px-3 py-2 focus:outline-none focus:border-primary"
+                >
+                  <option value="appearance_count">出现天数</option>
+                  <option value="stock_code">股票代码</option>
+                  <option value="stock_name">股票名称</option>
+                  <option value="avg_price">平均价格</option>
+                  <option value="avg_strength">平均趋势强度</option>
+                </select>
+                <button
+                  onClick={() => setPersistentSortOrder(persistentSortOrder === 'asc' ? 'desc' : 'asc')}
+                  className="flex items-center gap-1 px-3 py-2 bg-white/5 text-white text-sm rounded-lg hover:bg-white/10 transition-colors"
+                >
+                  {persistentSortOrder === 'asc' ? '↑ 升序' : '↓ 降序'}
+                </button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="text-left border-b border-white/10">
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => {
+                          if (persistentSortBy === 'stock_code') {
+                            setPersistentSortOrder(persistentSortOrder === 'asc' ? 'desc' : 'asc')
+                          } else {
+                            setPersistentSortBy('stock_code')
+                            setPersistentSortOrder('desc')
+                          }
+                        }}
+                      >
+                        股票代码 {persistentSortBy === 'stock_code' && (persistentSortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => {
+                          if (persistentSortBy === 'stock_name') {
+                            setPersistentSortOrder(persistentSortOrder === 'asc' ? 'desc' : 'asc')
+                          } else {
+                            setPersistentSortBy('stock_name')
+                            setPersistentSortOrder('desc')
+                          }
+                        }}
+                      >
+                        股票名称 {persistentSortBy === 'stock_name' && (persistentSortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => {
+                          if (persistentSortBy === 'appearance_count') {
+                            setPersistentSortOrder(persistentSortOrder === 'asc' ? 'desc' : 'asc')
+                          } else {
+                            setPersistentSortBy('appearance_count')
+                            setPersistentSortOrder('desc')
+                          }
+                        }}
+                      >
+                        出现天数 {persistentSortBy === 'appearance_count' && (persistentSortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => {
+                          if (persistentSortBy === 'avg_price') {
+                            setPersistentSortOrder(persistentSortOrder === 'asc' ? 'desc' : 'asc')
+                          } else {
+                            setPersistentSortBy('avg_price')
+                            setPersistentSortOrder('desc')
+                          }
+                        }}
+                      >
+                        平均价格 {persistentSortBy === 'avg_price' && (persistentSortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th
+                        className="pb-4 text-gray-400 font-medium text-sm cursor-pointer hover:text-white transition-colors"
+                        onClick={() => {
+                          if (persistentSortBy === 'avg_strength') {
+                            setPersistentSortOrder(persistentSortOrder === 'asc' ? 'desc' : 'asc')
+                          } else {
+                            setPersistentSortBy('avg_strength')
+                            setPersistentSortOrder('desc')
+                          }
+                        }}
+                      >
+                        平均趋势强度 {persistentSortBy === 'avg_strength' && (persistentSortOrder === 'asc' ? '↑' : '↓')}
+                      </th>
+                      <th className="pb-4 text-gray-400 font-medium text-sm">持续性评级</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {sortStocks(persistentStocks, persistentSortBy, persistentSortOrder).map((stock) => (
                     <tr key={stock.stock_code} className="hover:bg-white/5 transition-colors">
                       <td className="py-4 font-mono text-white">{stock.stock_code}</td>
                       <td className="py-4 text-white font-medium">{stock.stock_name}</td>
@@ -800,6 +1096,7 @@ export default function MarketScan() {
                 </tbody>
               </table>
             </div>
+          </div>
           )}
         </motion.div>
       )}
