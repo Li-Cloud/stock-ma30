@@ -7,12 +7,16 @@ import {
   Save,
   CheckCircle,
   Webhook,
-  Clock
+  Clock,
+  AlertCircle
 } from 'lucide-react'
+import { saveConfig } from '../api/client'
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState('notifications')
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const [config, setConfig] = useState({
     // 通知设置
@@ -38,9 +42,20 @@ export default function Settings() {
     tdxApiUrl: 'http://43.138.33.77:8080',
   })
 
-  const handleSave = () => {
-    setSaved(true)
-    setTimeout(() => setSaved(false), 3000)
+  const handleSave = async () => {
+    setSaving(true)
+    setError(null)
+    
+    try {
+      await saveConfig(config)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+    } catch (err: any) {
+      setError(err.message || '保存失败，请重试')
+      console.error('保存配置失败:', err)
+    } finally {
+      setSaving(false)
+    }
   }
 
   const tabs = [
@@ -390,13 +405,24 @@ export default function Settings() {
                     <span>设置已保存</span>
                   </motion.div>
                 )}
+                {error && (
+                  <motion.div
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="flex items-center gap-2 text-red-400"
+                  >
+                    <AlertCircle className="w-5 h-5" />
+                    <span>{error}</span>
+                  </motion.div>
+                )}
               </div>
               <button
                 onClick={handleSave}
-                className="flex items-center gap-2 px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors font-medium"
+                disabled={saving}
+                className="flex items-center gap-2 px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Save className="w-4 h-4" />
-                保存设置
+                {saving ? '保存中...' : '保存设置'}
               </button>
             </div>
           </div>

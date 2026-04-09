@@ -6,6 +6,7 @@ import asyncio
 import sys
 import time
 import os
+import re
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -70,6 +71,34 @@ class NotifyRequest(BaseModel):
 class StockAnalysisRequest(BaseModel):
     stock_code: str
     stock_name: Optional[str] = ""
+
+
+class ConfigUpdateRequest(BaseModel):
+    """配置更新请求"""
+    # 通知设置
+    dingtalk_enabled: Optional[bool] = None
+    dingtalk_webhook: Optional[str] = None
+    dingtalk_secret: Optional[str] = None
+    feishu_enabled: Optional[bool] = None
+    feishu_webhook: Optional[str] = None
+    
+    # AI设置
+    ai_enabled: Optional[bool] = None
+    ai_api_key: Optional[str] = None
+    ai_api_base: Optional[str] = None
+    ai_model: Optional[str] = None
+    
+    # 定时任务
+    schedule_enabled: Optional[bool] = None
+    schedule_day: Optional[int] = None
+    schedule_time: Optional[str] = None
+    
+    # 数据源
+    data_source: Optional[str] = None
+    tdx_api_url: Optional[str] = None
+    
+    # 股票池
+    stock_pool: Optional[str] = None
 
 
 # 生命周期管理
@@ -447,6 +476,95 @@ async def get_config():
         "feishu_configured": bool(settings.feishu_webhook_url),
         "ai_configured": bool(settings.openai_api_key)
     }
+
+
+@app.post("/api/config")
+async def update_config(request: ConfigUpdateRequest):
+    """
+    更新系统配置
+    
+    保存配置到 .env 文件
+    """
+    try:
+        settings = get_settings()
+        env_file = os.path.join(os.path.dirname(__file__), '.env')
+        
+        # 读取现有 .env 文件内容
+        env_content = ""
+        if os.path.exists(env_file):
+            with open(env_file, 'r', encoding='utf-8') as f:
+                env_content = f.read()
+        
+        # 更新配置
+        updates = []
+        
+        # 通知设置
+        if request.dingtalk_enabled is not None:
+            updates.append(("DINGTALK_ENABLED", "true" if request.dingtalk_enabled else "false"))
+        if request.dingtalk_webhook is not None:
+            updates.append(("DINGTALK_WEBHOOK_URL", request.dingtalk_webhook))
+        if request.dingtalk_secret is not None:
+            updates.append(("DINGTALK_SECRET", request.dingtalk_secret))
+        if request.feishu_enabled is not None:
+            updates.append(("FEISHU_ENABLED", "true" if request.feishu_enabled else "false"))
+        if request.feishu_webhook is not None:
+            updates.append(("FEISHU_WEBHOOK_URL", request.feishu_webhook))
+        
+        # AI设置
+        if request.ai_enabled is not None:
+            updates.append(("OPENAI_ENABLED", "true" if request.ai_enabled else "false"))
+        if request.ai_api_key is not None:
+            updates.append(("OPENAI_API_KEY", request.ai_api_key))
+        if request.ai_api_base is not None:
+            updates.append(("OPENAI_API_BASE", request.ai_api_base))
+        if request.ai_model is not None:
+            updates.append(("OPENAI_MODEL", request.ai_model))
+        
+        # 定时任务
+        if request.schedule_enabled is not None:
+            updates.append(("SCHEDULE_ENABLED", "true" if request.schedule_enabled else "false"))
+        if request.schedule_day is not None:
+            updates.append(("SCHEDULE_DAY", str(request.schedule_day)))
+        if request.schedule_time is not None:
+            updates.append(("SCHEDULE_TIME", request.schedule_time))
+        
+        # 数据源
+        if request.data_source is not None:
+            updates.append(("DATA_SOURCE", request.data_source))
+        if request.tdx_api_url is not None:
+            updates.append(("TDX_API_URL", request.tdx_api_url))
+        
+        # 股票池
+        if request.stock_pool is not None:
+            updates.append(("STOCK_POOL", request.stock_pool))
+        
+        # 更新 .env 文件
+        if updates:
+            for key, value in updates:
+                # 检查是否已存在该键
+                pattern = f"^{key}=.*$"
+                if re.search(pattern, env_content, re.MULTILINE):
+                    # 替换现有值
+                    env_content = re.sub(pattern, f"{key}={value}", env_content, flags=re.MULTILINE)
+                else:
+                    # 添加新键值对
+                    env_content += f"\n{key}={value}"
+            
+            # 写入文件
+            with open(env_file, 'w', encoding='utf-8') as f:
+                f.write(env_content)
+            
+            logger.info(f"配置已更新: {len(updates)} 个参数")
+        
+        return {
+            "success": True,
+            "message": f"配置已更新 {len(updates)} 个参数",
+            "updated_params": [key for key, _ in updates]
+        }
+        
+    except Exception as e:
+        logger.error(f"更新配置失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/market/scan")

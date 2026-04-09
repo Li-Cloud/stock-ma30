@@ -120,3 +120,52 @@ export async function getPersistentPhase2Stocks(minDays: number = 3) {
 export async function getScanProgress() {
   return fetchAPI('/api/market/scan/progress');
 }
+
+// 保存系统配置
+export async function saveConfig(config: {
+  // 通知设置
+  dingtalkEnabled?: boolean;
+  dingtalkWebhook?: string;
+  dingtalkSecret?: string;
+  feishuEnabled?: boolean;
+  feishuWebhook?: string;
+  
+  // AI设置
+  aiEnabled?: boolean;
+  aiApiKey?: string;
+  aiApiBase?: string;
+  aiModel?: string;
+  
+  // 定时任务
+  scheduleEnabled?: boolean;
+  scheduleDay?: number;
+  scheduleTime?: string;
+  
+  // 数据源
+  dataSource?: string;
+  tdxApiUrl?: string;
+  
+  // 股票池
+  stockPool?: string;
+}) {
+  return fetchAPI('/api/config', {
+    method: 'POST',
+    body: JSON.stringify({
+      dingtalk_enabled: config.dingtalkEnabled,
+      dingtalk_webhook: config.dingtalkWebhook,
+      dingtalk_secret: config.dingtalkSecret,
+      feishu_enabled: config.feishuEnabled,
+      feishu_webhook: config.feishuWebhook,
+      ai_enabled: config.aiEnabled,
+      ai_api_key: config.aiApiKey,
+      ai_api_base: config.aiApiBase,
+      ai_model: config.aiModel,
+      schedule_enabled: config.scheduleEnabled,
+      schedule_day: config.scheduleDay,
+      schedule_time: config.scheduleTime,
+      data_source: config.dataSource,
+      tdx_api_url: config.tdxApiUrl,
+      stock_pool: config.stockPool
+    })
+  });
+}
